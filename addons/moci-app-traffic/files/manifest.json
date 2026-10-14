@@ -1,0 +1,11 @@
+{
+	"id": "traffic",
+	"entry": "addon.js",
+	"name": "Traffic",
+	"version": "1.0.0",
+	"description": "Per-host and per-application traffic accounting from nlbwmon.",
+	"author": { "name": "2bleere" },
+	"license": "MIT",
+	"files": ["addon.js"],
+	"nav": { "route": "/traffic", "label": "TRAFFIC", "placement": "top" }
+}

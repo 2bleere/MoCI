@@ -1,0 +1,14 @@
+{
+	"moci-app-traffic": {
+		"description": "MoCI add-on Traffic: read nlbwmon accounting, edit and control nlbwmon",
+		"read": {
+			"ubus": { "rc": ["list"], "moci": ["getDHCPLeases"] },
+			"uci": ["nlbwmon"],
+			"file": { "/usr/sbin/nlbw *": ["exec"] }
+		},
+		"write": {
+			"ubus": { "rc": ["init"] },
+			"uci": ["nlbwmon"]
+		}
+	}
+}
