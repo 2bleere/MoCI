@@ -26,7 +26,8 @@
 				"/usr/bin/traceroute": ["exec"],
 				"/usr/bin/traceroute6": ["exec"],
 				"/usr/bin/nslookup": ["exec"],
-				"/bin/df -h": ["exec"]
+				"/bin/df -h": ["exec"],
+				"/usr/libexec/moci-pkg-call pkg-list-installed": ["exec"]
 			},
 			"ubus": {
 				"network.interface": ["dump"],
@@ -36,9 +37,10 @@
 				"system": ["info", "board"],
 				"moci": ["getDHCPLeases", "getPorts", "getBridges"],
 				"service": ["list"],
-				"iwinfo": ["devices", "info", "assoclist", "freqlist"]
+				"iwinfo": ["devices", "info", "assoclist", "freqlist"],
+				"rc": ["list"]
 			},
-			"uci": ["moci"]
+			"uci": ["dropbear", "moci", "system"]
 		},
 		"write": {
 			"file": {
@@ -61,16 +63,19 @@
 				"/sbin/sysupgrade -n /tmp/firmware.bin": ["exec"],
 				"/sbin/firstboot -y": ["exec"],
 				"/bin/rm -f /tmp/backup.tar.gz": ["exec"],
-				"/bin/rm -f /tmp/firmware.bin": ["exec"]
+				"/bin/rm -f /tmp/firmware.bin": ["exec"],
+				"/usr/libexec/moci-pkg-call pkg-install *": ["exec"],
+				"/usr/libexec/moci-pkg-call pkg-remove *": ["exec"]
 			},
 			"ubus": {
 				"uci": ["set", "add", "delete", "commit", "apply", "confirm", "rollback", "order"],
 				"file": ["write", "exec"],
 				"system": ["reboot"],
 				"network.interface": ["up", "down"],
-				"moci": ["setPassword", "wgGenKey"]
+				"moci": ["setPassword", "wgGenKey"],
+				"rc": ["init"]
 			},
-			"uci": ["network", "wireless", "firewall", "dhcp", "system", "qos", "sqm", "ddns", "moci"]
+			"uci": ["ddns", "dhcp", "dropbear", "firewall", "moci", "network", "qos", "sqm", "system", "wireless"]
 		}
 	}
 }

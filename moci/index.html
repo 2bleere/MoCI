@@ -1997,6 +1997,12 @@
 									<button class="action-btn" id="save-general-btn">SAVE CHANGES</button>
 								</div>
 							</div>
+							<div class="stat-card" style="margin-top: 24px">
+								<div style="color: var(--steel-muted); font-size: 13px; margin-bottom: 12px">
+									Router time: <span id="system-localtime">-</span>
+								</div>
+								<div id="system-ntp"></div>
+							</div>
 						</div>
 
 						<div class="tab-content hidden" id="tab-logs">
@@ -2073,8 +2079,36 @@
 						</div>
 
 						<div class="tab-content hidden" id="tab-software">
+							<div class="stat-card" style="margin-bottom: 24px">
+								<div class="section-title">INSTALL PACKAGES</div>
+								<div style="display: flex; gap: 8px; flex-wrap: wrap">
+									<input
+										type="text"
+										id="pkg-install-name"
+										class="form-input"
+										placeholder="package names, space-separated"
+										style="flex: 1; min-width: 220px"
+									/>
+									<button class="action-btn" id="pkg-install-btn">INSTALL</button>
+									<button class="action-btn" id="pkg-update-btn">UPDATE LISTS</button>
+								</div>
+								<pre
+									id="pkg-output"
+									class="log-viewer hidden"
+									style="margin-top: 12px; max-height: 300px; white-space: pre-wrap"
+								></pre>
+							</div>
 							<div class="stat-card">
-								<div class="section-title">INSTALLED PACKAGES</div>
+								<div class="section-title">
+									INSTALLED PACKAGES <span id="pkg-count" style="color: var(--steel-muted)"></span>
+								</div>
+								<input
+									type="text"
+									id="pkg-filter"
+									class="form-input"
+									placeholder="Filter..."
+									style="margin-bottom: 12px"
+								/>
 								<table class="data-table" id="packages-table">
 									<thead>
 										<tr>
@@ -2144,6 +2178,7 @@
 						</div>
 
 						<div class="tab-content hidden" id="tab-ssh-keys">
+							<div class="stat-card" id="system-dropbear" style="margin-bottom: 24px"></div>
 							<div class="stat-card">
 								<div class="section-title">SSH AUTHORIZED KEYS</div>
 								<div class="quick-actions" style="margin-bottom: 16px">

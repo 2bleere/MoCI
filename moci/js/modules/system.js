@@ -1,3 +1,5 @@
+import { UciSectionForm } from '../lib/uci-sections.js';
+
 export default class SystemModule {
 	constructor(core) {
 		this.core = core;
@@ -13,14 +15,20 @@ export default class SystemModule {
 
 			if (!this.subTabs) {
 				this.subTabs = this.core.setupSubTabs('system-page', {
-					general: () => this.loadGeneral(),
+					general: () => {
+						this.loadGeneral();
+						this.loadNtp();
+					},
 					admin: () => this.loadAdmin(),
 					logs: () => this.loadLogs(),
 					backup: () => this.loadBackup(),
 					software: () => this.loadPackages(),
 					startup: () => this.loadStartup(),
 					cron: () => this.loadCron(),
-					'ssh-keys': () => this.loadSSHKeys(),
+					'ssh-keys': () => {
+						this.loadSSHKeys();
+						this.loadDropbear();
+					},
 					mounts: () => this.loadMounts(),
 					led: () => this.loadLED(),
 					upgrade: () => this.loadUpgrade()
@@ -55,7 +63,9 @@ export default class SystemModule {
 			},
 			'parse-keys-btn': () => this.parseSSHKeyInput(),
 			'refresh-syslog-btn': () => this.loadLog('syslog'),
-			'refresh-klog-btn': () => this.loadLog('klog')
+			'refresh-klog-btn': () => this.loadLog('klog'),
+			'pkg-install-btn': () => this.installPackage(),
+			'pkg-update-btn': () => this.runPkg(['update'])
 		};
 
 		for (const [id, handler] of Object.entries(buttons)) {
@@ -85,7 +95,10 @@ export default class SystemModule {
 		const delegations = {
 			'cron-table': { edit: id => this.editCronEntry(id), delete: id => this.deleteCronEntry(id) },
 			'ssh-keys-table': { delete: id => this.deleteSSHKey(id) },
-			'services-table': { toggle: id => this.toggleService(id) }
+			'services-table': Object.fromEntries(
+				['start', 'stop', 'restart', 'enable', 'disable'].map(a => [a, id => this.serviceAction(id, a)])
+			),
+			'packages-table': { remove: id => this.removePackage(id) }
 		};
 
 		for (const [tableId, handlers] of Object.entries(delegations)) {
@@ -135,6 +148,96 @@ export default class SystemModule {
 		} catch {
 			this.core.showToast('Failed to save settings', 'error');
 		}
+	}
+
+	async loadNtp() {
+		if (!this.ntpForm) {
+			this.ntpForm = new UciSectionForm(this.core, {
+				container: 'system-ntp',
+				config: 'system',
+				section: 'ntp',
+				type: 'timeserver',
+				title: 'TIME SYNCHRONISATION (NTP)',
+				onChange: () =>
+					this.core.ubusCall('rc', 'init', { name: 'sysntpd', action: 'restart' }).catch(() => {}),
+				fields: [
+					{ key: 'enabled', label: 'SYNC TIME FROM NTP SERVERS', type: 'bool', def: '1' },
+					{ key: 'enable_server', label: 'SERVE TIME TO THE LAN', type: 'bool', def: '0' },
+					{ key: 'use_dhcp', label: 'USE NTP SERVERS ANNOUNCED BY DHCP', type: 'bool', def: '1' },
+					{
+						key: 'server',
+						label: 'NTP SERVERS (space-separated)',
+						type: 'list',
+						placeholder: '0.openwrt.pool.ntp.org 1.openwrt.pool.ntp.org'
+					}
+				]
+			});
+		}
+		const [st, res] = await this.core.uciGet('system').catch(() => [1]);
+		if (st === 0) this.ntpForm.render(res.values);
+		const [, info] = await this.core.ubusCall('system', 'info', {}).catch(() => [1]);
+		const el = document.getElementById('system-localtime');
+		if (el && info?.localtime)
+			el.textContent = new Date(info.localtime * 1000).toISOString().replace('T', ' ').slice(0, 19);
+	}
+
+	async loadDropbear() {
+		const [st, res] = await this.core.uciGet('dropbear').catch(() => [1]);
+		if (st !== 0) return;
+		const section = this.core.filterUciSections(res.values, 'dropbear')[0]?.section;
+		if (!section) return;
+		if (!this.dropbearForm) {
+			this.dropbearForm = new UciSectionForm(this.core, {
+				container: 'system-dropbear',
+				config: 'dropbear',
+				section,
+				type: 'dropbear',
+				title: 'SSH SERVER',
+				help: 'Turning off password login only takes effect for new sessions; make sure a key works first.',
+				onChange: () =>
+					this.core.ubusCall('rc', 'init', { name: 'dropbear', action: 'reload' }).catch(() => {}),
+				fields: [
+					{ key: 'Port', label: 'PORT', type: 'number', placeholder: '22' },
+					{ key: 'Interface', label: 'LISTEN ON INTERFACE (empty = all)', placeholder: 'lan' },
+					{ key: 'PasswordAuth', label: 'ALLOW PASSWORD LOGIN', type: 'bool', def: '1' },
+					{ key: 'RootPasswordAuth', label: 'ALLOW ROOT PASSWORD LOGIN', type: 'bool', def: '1' },
+					{ key: 'GatewayPorts', label: 'ALLOW REMOTE HOSTS TO USE FORWARDED PORTS', type: 'bool', def: '0' }
+				]
+			});
+		}
+		this.dropbearForm.o.section = section;
+		this.dropbearForm.render(res.values);
+	}
+
+	async installPackage() {
+		const input = document.getElementById('pkg-install-name');
+		const names = input.value.trim().split(/\s+/).filter(Boolean);
+		if (!names.length || names.some(n => !/^[a-z0-9][a-z0-9._+-]*$/.test(n))) {
+			this.core.showToast('Package names: lower-case letters, digits and . _ + -', 'error');
+			return;
+		}
+		await this.runPkg(['pkg-install', ...names], `Install ${names.join(', ')}?`);
+		input.value = '';
+	}
+
+	async removePackage(name) {
+		await this.runPkg(['pkg-remove', name], `Remove ${name}? Packages that depend on it may be removed too.`);
+	}
+
+	async runPkg(args, question) {
+		if (question && !confirm(question)) return;
+		const out = document.getElementById('pkg-output');
+		out.textContent = `$ ${args.join(' ')}\n...`;
+		out.classList.remove('hidden');
+		try {
+			const text = await this.core.pkgCall(...args);
+			out.textContent = `$ ${args.join(' ')}\n${text}`;
+			this.core.showToast('Done', 'success');
+		} catch (e) {
+			out.textContent = `$ ${args.join(' ')}\n${e.message}`;
+			this.core.showToast('Package operation failed', 'error');
+		}
+		this.loadPackages();
 	}
 
 	async loadAdmin() {}
@@ -265,110 +368,83 @@ export default class SystemModule {
 
 	async loadPackages() {
 		await this.core.loadResource('packages-table', 3, 'packages', async () => {
-			// apk (OpenWrt 25.12+) keeps "P:name" / "V:version" records, opkg "Package: " / "Version: "
-			const sources = [
-				{ path: '/lib/apk/db/installed', name: 'P:', version: 'V:' },
-				{ path: '/usr/lib/opkg/status', name: 'Package: ', version: 'Version: ' }
-			];
-			let data = null;
-			let src = null;
-			for (const s of sources) {
-				const [status, result] = await this.core.ubusCall('file', 'read', { path: s.path }).catch(() => [1]);
-				if (status === 0 && result?.data) {
-					data = result.data;
-					src = s;
-					break;
-				}
-			}
-			if (!data) throw new Error('No data');
-
-			const packages = [];
-			for (const block of data.split('\n\n')) {
-				let pkg = {};
-				for (const line of block.split('\n')) {
-					if (line.startsWith(src.name)) pkg.name = line.substring(src.name.length);
-					else if (line.startsWith(src.version)) pkg.version = line.substring(src.version.length);
-				}
-				if (pkg.name) packages.push(pkg);
-			}
+			const out = await this.core.pkgCall('pkg-list-installed');
+			const packages = out
+				.split('\n')
+				.map(l => l.trim().split(' '))
+				.filter(([name]) => name)
+				.map(([name, version]) => ({ name, version: version || '' }));
 			packages.sort((a, b) => a.name.localeCompare(b.name));
+			this._packages = packages;
+			this.renderPackages();
+		});
+		const filter = document.getElementById('pkg-filter');
+		if (filter && !filter.dataset.bound) {
+			filter.dataset.bound = '1';
+			filter.addEventListener('input', () => this.renderPackages());
+		}
+	}
 
-			const display = packages.slice(0, 100);
-			let html = display
-				.map(
-					p => `<tr>
+	renderPackages() {
+		const q = (document.getElementById('pkg-filter')?.value || '').trim().toLowerCase();
+		const all = this._packages || [];
+		const list = q ? all.filter(p => p.name.toLowerCase().includes(q)) : all;
+		const count = document.getElementById('pkg-count');
+		if (count) count.textContent = `${list.length} of ${all.length}`;
+		this.core.renderTable(
+			'#packages-table',
+			list,
+			3,
+			'No packages found',
+			p => `<tr>
 				<td>${this.core.escapeHtml(p.name)}</td>
 				<td>${this.core.escapeHtml(p.version)}</td>
-				<td>${this.core.renderBadge('success', 'Installed')}</td>
+				<td><button class="action-btn-sm danger" data-action="remove" data-id="${this.core.escapeHtml(p.name)}">REMOVE</button></td>
 			</tr>`
-				)
-				.join('');
-			if (packages.length > 100) {
-				html += `<tr><td colspan="3" style="text-align:center;color:var(--steel-muted)">Showing 100 of ${packages.length} packages</td></tr>`;
-			}
-			const tbody = document.querySelector('#packages-table tbody');
-			if (tbody) {
-				if (packages.length === 0) {
-					this.core.renderEmptyTable(tbody, 3, 'No packages found');
-				} else {
-					tbody.innerHTML = html;
-				}
-			}
-		});
+		);
 	}
 
 	async loadStartup() {
 		await this.core.loadResource('services-table', 4, 'services', async () => {
-			const [status, result] = await this.core.ubusCall('service', 'list', {});
+			const [status, result] = await this.core.ubusCall('rc', 'list', {});
 			if (status !== 0 || !result) throw new Error('No data');
-
-			const services = Object.entries(result).map(([name, info]) => ({
-				name,
-				running: info.instances && Object.keys(info.instances).length > 0
-			}));
-
+			const services = Object.entries(result)
+				.map(([name, info]) => ({ name, ...info }))
+				.sort((a, b) => (a.start ?? 99) - (b.start ?? 99) || a.name.localeCompare(b.name));
+			const btn = (action, name, label, danger) =>
+				`<button class="action-btn-sm${danger ? ' danger' : ''}" data-action="${action}" data-id="${this.core.escapeHtml(name)}">${label}</button>`;
 			this.core.renderTable(
 				'#services-table',
 				services,
 				4,
 				'No services found',
 				s => `<tr>
-				<td>${this.core.escapeHtml(s.name)}</td>
+				<td>${this.core.escapeHtml(s.name)}${s.start !== undefined ? ` <span style="color:var(--steel-muted);font-size:12px">(${this.core.escapeHtml(s.start)})</span>` : ''}</td>
 				<td>${s.running ? this.core.renderBadge('success', 'RUNNING') : this.core.renderBadge('error', 'STOPPED')}</td>
-				<td>${this.core.renderBadge('info', 'N/A')}</td>
-				<td>
-					<div class="action-buttons">
-						<button class="action-btn" data-action="toggle" data-id="${this.core.escapeHtml(s.name)}" style="font-size:11px;padding:4px 8px">
-							${s.running ? 'STOP' : 'START'}
-						</button>
-					</div>
-				</td>
+				<td>${s.enabled ? this.core.renderBadge('info', 'ENABLED') : this.core.renderBadge('warning', 'DISABLED')}</td>
+				<td><div class="action-buttons">
+					${s.running ? btn('restart', s.name, 'RESTART') + btn('stop', s.name, 'STOP', true) : btn('start', s.name, 'START')}
+					${s.enabled ? btn('disable', s.name, 'DISABLE') : btn('enable', s.name, 'ENABLE')}
+				</div></td>
 			</tr>`
 			);
 		});
 	}
 
-	async toggleService(name) {
-		if (!/^[a-zA-Z0-9_-]+$/.test(name)) {
+	async serviceAction(name, action) {
+		if (!/^[a-zA-Z0-9_.-]+$/.test(name)) {
 			this.core.showToast('Invalid service name', 'error');
 			return;
 		}
+		if ((action === 'stop' || action === 'disable') && !confirm(`${action} ${name}?`)) return;
 		try {
-			const [status, result] = await this.core.ubusCall('service', 'list', {});
-			const info = result?.[name];
-			const running = info?.instances && Object.keys(info.instances).length > 0;
-			const action = running ? 'stop' : 'start';
-
-			await this.core.ubusCall('file', 'exec', {
-				command: `/etc/init.d/${name}`,
-				params: [action]
-			});
-			const pastTense = action === 'stop' ? 'stopped' : `${action}ed`;
-			this.core.showToast(`Service ${name} ${pastTense}`, 'success');
-			this.loadStartup();
+			const [st] = await this.core.ubusCall('rc', 'init', { name, action });
+			if (st !== 0) throw new Error();
+			this.core.showToast(`${name}: ${action} done`, 'success');
 		} catch {
-			this.core.showToast(`Failed to toggle service ${name}`, 'error');
+			this.core.showToast(`Failed to ${action} ${name}`, 'error');
 		}
+		setTimeout(() => this.loadStartup(), 800);
 	}
 
 	async loadCron() {
@@ -514,9 +590,7 @@ export default class SystemModule {
 				<td>${this.core.escapeHtml(k.comment || 'N/A')}</td>
 				<td>
 					<div class="action-buttons">
-						<button class="btn-icon btn-delete" data-action="delete" data-id="${i}">
-							<svg viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M9 2a1 1 0 00-.894.553L7.382 4H4a1 1 0 000 2v10a2 2 0 002 2h8a2 2 0 002-2V6a1 1 0 100-2h-3.382l-.724-1.447A1 1 0 0011 2H9zM7 8a1 1 0 012 0v6a1 1 0 11-2 0V8zm5-1a1 1 0 00-1 1v6a1 1 0 102 0V8a1 1 0 00-1-1z" clip-rule="evenodd"/></svg>
-						</button>
+						<button class="action-btn-sm danger" data-action="delete" data-id="${i}">DELETE</button>
 					</div>
 				</td>
 			</tr>`

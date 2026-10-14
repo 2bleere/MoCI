@@ -16,6 +16,10 @@ valid_name() {
 FEED_CONF_OPKG=/etc/opkg/moci-apps.conf
 FEED_CONF_APK=/etc/apk/repositories.d/moci-apps.list
 
+valid_pkg_name() {
+	echo "$1" | grep -qE '^[a-z0-9][a-z0-9._+-]*$'
+}
+
 valid_feed_name() {
 	echo "$1" | grep -qE '^[a-z0-9][a-z0-9_-]*$'
 }
@@ -129,6 +133,26 @@ case "$action" in
 			apk del "$1"
 		else
 			opkg remove "$1"
+		fi
+		;;
+	pkg-list-installed)
+		# "name version" per line; reading the whole package database over ubus is too big
+		if [ -f /lib/apk/db/installed ]; then
+			awk -F: '$1 == "P" { n = substr($0, 3) } $1 == "V" { print n, substr($0, 3) }' /lib/apk/db/installed
+		else
+			awk '/^Package: / { n = $2 } /^Version: / { print n, $2 }' /usr/lib/opkg/status
+		fi
+		;;
+	pkg-install|pkg-remove)
+		# any package (the Software tab); names only, no options or paths
+		[ $# -gt 0 ] || { echo "no package given" >&2; exit 1; }
+		for p in "$@"; do
+			valid_pkg_name "$p" || { echo "invalid package name: $p" >&2; exit 1; }
+		done
+		if [ "$action" = pkg-install ]; then
+			if [ "$pm" = "apk" ]; then apk add "$@" 2>&1; else opkg install "$@" 2>&1; fi
+		else
+			if [ "$pm" = "apk" ]; then apk del "$@" 2>&1; else opkg remove "$@" 2>&1; fi
 		fi
 		;;
 	*)
