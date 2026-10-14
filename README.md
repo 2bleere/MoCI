@@ -14,6 +14,26 @@
 
 ---
 
+## This fork (`cds9010` branch)
+
+Extends MoCI so it can replace LuCI on an OpenWrt 25.12 router with LTE failover
+(developed on a DataRemote CDS-9010, MT7621):
+
+- **Core fixes**: interface editor for every protocol (static, DHCP, DHCPv6, QMI, MBIM,
+  PPPoE, WireGuard, GRE) that keeps options it does not show; wireless editor with WPA3/OWE,
+  channel width, country and connected clients (the original blanked `psk2+ccmp`);
+  network/firewall/wireless/mwan3 changes are applied with **automatic rollback** like LuCI;
+  SQM in the QoS tab; apk package list, install and remove; startup enable/disable;
+  NTP and SSH server settings; add-on routes that differ from the add-on id.
+- **Shared helpers** for add-ons: `js/lib/uci-sections.js` (section table + modal editor,
+  single-section form) and `js/lib/service-control.js` (rc-based service controls).
+- **Add-ons** (`addons/moci-app-*`): Multi-WAN (mwan3), Cellular (modem status, LTE bands,
+  SMS, AT console), Services (UPnP, SNMP, Watchcat, OpenVPN, VRRP), Traffic (nlbwmon) and
+  CDS-9010 (battery backup, modem controls, power alerts; needs that board's image).
+
+The package Makefile installs the plain `moci/` sources when no `dist/` build exists, so it
+builds in an OpenWrt tree without Node.
+
 ## What is this?
 
 A complete standalone web interface for OpenWrt routers. Not a LuCI theme—pure vanilla JavaScript SPA using OpenWrt's native ubus API.
