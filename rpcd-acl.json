@@ -4,6 +4,7 @@
 		"read": {
 			"file": {
 				"/usr/lib/opkg/status": ["read"],
+				"/lib/apk/db/installed": ["read"],
 				"/var/lib/opkg/status": ["read"],
 				"/proc/net/dev": ["read"],
 				"/proc/net/arp": ["read"],
@@ -68,16 +69,7 @@
 				"network.interface": ["up", "down"],
 				"moci": ["setPassword", "wgGenKey"]
 			},
-			"uci": [
-				"network",
-				"wireless",
-				"firewall",
-				"dhcp",
-				"system",
-				"qos",
-				"ddns",
-				"moci"
-			]
+			"uci": ["network", "wireless", "firewall", "dhcp", "system", "qos", "ddns", "moci"]
 		}
 	}
 }

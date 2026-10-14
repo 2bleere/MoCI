@@ -203,6 +203,9 @@
 
 						<div class="tab-content" id="tab-interfaces">
 							<div class="stat-card">
+								<button class="action-btn" id="add-interface-btn" style="margin-bottom: 16px">
+									+ ADD INTERFACE
+								</button>
 								<table class="data-table" id="interfaces-table">
 									<thead>
 										<tr>
@@ -494,55 +497,32 @@
 								<div class="modal-body">
 									<input type="hidden" id="edit-iface-name" />
 
+									<div class="form-group" id="edit-iface-newname-group">
+										<label class="form-label">NAME</label>
+										<input
+											type="text"
+											id="edit-iface-newname"
+											class="form-input"
+											placeholder="wan2"
+										/>
+									</div>
+
 									<div class="form-group">
 										<label class="form-label">PROTOCOL</label>
 										<select id="edit-iface-proto" class="form-input">
-											<option value="static">Static</option>
-											<option value="dhcp">DHCP</option>
+											<option value="static">Static address</option>
+											<option value="dhcp">DHCP client</option>
+											<option value="dhcpv6">DHCPv6 client</option>
+											<option value="qmi">QMI cellular</option>
+											<option value="mbim">MBIM cellular</option>
+											<option value="pppoe">PPPoE</option>
+											<option value="wireguard">WireGuard</option>
+											<option value="gre">GRE tunnel</option>
+											<option value="none">Unmanaged</option>
 										</select>
 									</div>
 
-									<div id="static-config">
-										<div class="form-group">
-											<label class="form-label">IPV4 ADDRESS</label>
-											<input
-												type="text"
-												id="edit-iface-ipaddr"
-												class="form-input"
-												placeholder="192.168.1.1"
-											/>
-										</div>
-
-										<div class="form-group">
-											<label class="form-label">NETMASK</label>
-											<input
-												type="text"
-												id="edit-iface-netmask"
-												class="form-input"
-												placeholder="255.255.255.0"
-											/>
-										</div>
-
-										<div class="form-group">
-											<label class="form-label">GATEWAY</label>
-											<input
-												type="text"
-												id="edit-iface-gateway"
-												class="form-input"
-												placeholder="192.168.1.254"
-											/>
-										</div>
-
-										<div class="form-group">
-											<label class="form-label">DNS SERVERS (space-separated)</label>
-											<input
-												type="text"
-												id="edit-iface-dns"
-												class="form-input"
-												placeholder="8.8.8.8 8.8.4.4"
-											/>
-										</div>
-									</div>
+									<div id="iface-proto-fields"></div>
 								</div>
 								<div class="modal-footer">
 									<button class="action-btn" id="cancel-interface-btn">CANCEL</button>

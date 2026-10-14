@@ -265,18 +265,33 @@ export default class SystemModule {
 
 	async loadPackages() {
 		await this.core.loadResource('packages-table', 3, 'packages', async () => {
-			const [status, result] = await this.core.ubusCall('file', 'read', { path: '/usr/lib/opkg/status' });
-			if (status !== 0 || !result?.data) throw new Error('No data');
+			// apk (OpenWrt 25.12+) keeps "P:name" / "V:version" records, opkg "Package: " / "Version: "
+			const sources = [
+				{ path: '/lib/apk/db/installed', name: 'P:', version: 'V:' },
+				{ path: '/usr/lib/opkg/status', name: 'Package: ', version: 'Version: ' }
+			];
+			let data = null;
+			let src = null;
+			for (const s of sources) {
+				const [status, result] = await this.core.ubusCall('file', 'read', { path: s.path }).catch(() => [1]);
+				if (status === 0 && result?.data) {
+					data = result.data;
+					src = s;
+					break;
+				}
+			}
+			if (!data) throw new Error('No data');
 
 			const packages = [];
-			for (const block of result.data.split('\n\n')) {
+			for (const block of data.split('\n\n')) {
 				let pkg = {};
 				for (const line of block.split('\n')) {
-					if (line.startsWith('Package: ')) pkg.name = line.substring(9);
-					else if (line.startsWith('Version: ')) pkg.version = line.substring(9);
+					if (line.startsWith(src.name)) pkg.name = line.substring(src.name.length);
+					else if (line.startsWith(src.version)) pkg.version = line.substring(src.version.length);
 				}
 				if (pkg.name) packages.push(pkg);
 			}
+			packages.sort((a, b) => a.name.localeCompare(b.name));
 
 			const display = packages.slice(0, 100);
 			let html = display

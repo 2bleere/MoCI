@@ -88,6 +88,7 @@ export default class NetworkModule {
 				this.subTabs.attachListeners();
 				this.setupModals();
 				this.setupDiagnostics();
+				this.setupInterfaceEditor();
 			}
 
 			const tab = subPaths[0] || 'interfaces';
@@ -245,12 +246,17 @@ export default class NetworkModule {
 
 	async loadInterfaces() {
 		await this.core.loadResource('interfaces-table', 6, 'network', async () => {
-			const [, result] = await this.core.ubusCall('network.interface', 'dump', {});
+			const [[, result], [, devices]] = await Promise.all([
+				this.core.ubusCall('network.interface', 'dump', {}),
+				this.core.ubusCall('network.device', 'status', {}).catch(() => [1])
+			]);
 			if (!result?.interface) throw new Error('No data');
 			this.core.renderTable('#interfaces-table', result.interface, 6, 'No interfaces found', iface => {
 				const ipv4 = iface['ipv4-address']?.[0]?.address || '---.---.---.---';
-				const rx = this.core.formatBytes(iface.statistics?.rx_bytes || 0);
-				const tx = this.core.formatBytes(iface.statistics?.tx_bytes || 0);
+				// interface dump carries no counters: take them from the L3 device
+				const stats = iface.statistics || devices?.[iface.l3_device || iface.device]?.statistics;
+				const rx = this.core.formatBytes(stats?.rx_bytes || 0);
+				const tx = this.core.formatBytes(stats?.tx_bytes || 0);
 				return `<tr>
 					<td>${this.core.escapeHtml(iface.interface)}</td>
 					<td>${this.core.escapeHtml(iface.proto || 'none').toUpperCase()}</td>
@@ -263,17 +269,188 @@ export default class NetworkModule {
 		});
 	}
 
+	// Per-protocol interface options. Only the options listed here are written; anything
+	// else already in the section is left alone, so unknown settings survive an edit.
+	static IFACE_FIELDS = (() => {
+		const device = { key: 'device', label: 'DEVICE', placeholder: 'br-lan, wan, eth0.2' };
+		const metric = { key: 'metric', label: 'METRIC (lower wins)', placeholder: '0' };
+		const mtu = { key: 'mtu', label: 'MTU', placeholder: '1500' };
+		const peerdns = { key: 'peerdns', label: 'USE DNS FROM PEER', type: 'bool', def: '1' };
+		const dns = {
+			key: 'dns',
+			label: 'DNS SERVERS (space-separated)',
+			type: 'list',
+			placeholder: '1.1.1.1 9.9.9.9'
+		};
+		const cell = [
+			{ key: 'device', label: 'MODEM DEVICE', placeholder: '/dev/cdc-wdm0' },
+			{ key: 'apn', label: 'APN' },
+			{
+				key: 'pdptype',
+				label: 'PDP TYPE',
+				type: 'select',
+				options: [
+					['ipv4v6', 'IPv4 + IPv6'],
+					['ipv4', 'IPv4'],
+					['ipv6', 'IPv6']
+				]
+			},
+			{
+				key: 'auth',
+				label: 'AUTHENTICATION',
+				type: 'select',
+				options: [
+					['', 'None'],
+					['pap', 'PAP'],
+					['chap', 'CHAP'],
+					['both', 'PAP/CHAP']
+				]
+			},
+			{ key: 'username', label: 'USERNAME' },
+			{ key: 'password', label: 'PASSWORD', type: 'password' },
+			{ key: 'pincode', label: 'SIM PIN', type: 'password' }
+		];
+		return {
+			static: [
+				device,
+				{ key: 'ipaddr', label: 'IPV4 ADDRESS (or address/prefix)', type: 'list', placeholder: '192.168.1.1' },
+				{ key: 'netmask', label: 'NETMASK', placeholder: '255.255.255.0' },
+				{ key: 'gateway', label: 'GATEWAY', placeholder: '192.168.1.254' },
+				dns,
+				{ key: 'ip6assign', label: 'IPV6 PREFIX LENGTH TO ASSIGN', placeholder: '60' },
+				metric
+			],
+			dhcp: [
+				device,
+				{ key: 'hostname', label: 'HOSTNAME TO SEND' },
+				peerdns,
+				dns,
+				{ key: 'defaultroute', label: 'USE DEFAULT GATEWAY', type: 'bool', def: '1' },
+				metric
+			],
+			dhcpv6: [
+				device,
+				{
+					key: 'reqaddress',
+					label: 'REQUEST ADDRESS',
+					type: 'select',
+					options: [
+						['try', 'Try'],
+						['force', 'Force'],
+						['none', 'None']
+					]
+				},
+				{ key: 'reqprefix', label: 'REQUEST PREFIX (auto, no or length)', placeholder: 'auto' },
+				peerdns,
+				dns,
+				metric
+			],
+			qmi: [...cell, { key: 'dhcp', label: 'USE DHCP ON DATA PORT', type: 'bool', def: '1' }, metric, mtu],
+			mbim: [...cell, metric, mtu],
+			pppoe: [
+				device,
+				{ key: 'username', label: 'USERNAME' },
+				{ key: 'password', label: 'PASSWORD', type: 'password' },
+				{ key: 'ac', label: 'ACCESS CONCENTRATOR' },
+				{ key: 'service', label: 'SERVICE NAME' },
+				peerdns,
+				metric,
+				mtu
+			],
+			wireguard: [
+				{ key: 'private_key', label: 'PRIVATE KEY', type: 'password' },
+				{ key: 'listen_port', label: 'LISTEN PORT', placeholder: '51820' },
+				{ key: 'addresses', label: 'ADDRESSES (space-separated)', type: 'list', placeholder: '10.0.0.1/24' },
+				mtu
+			],
+			gre: [
+				{ key: 'peeraddr', label: 'REMOTE ADDRESS' },
+				{ key: 'ipaddr', label: 'LOCAL ADDRESS' },
+				{ key: 'tunlink', label: 'BIND TO INTERFACE', placeholder: 'wan' },
+				{ key: 'ttl', label: 'TTL', placeholder: '64' },
+				mtu
+			],
+			none: [device],
+			_common: [{ key: 'auto', label: 'START ON BOOT', type: 'bool', def: '1' }]
+		};
+	})();
+
+	ifaceFields(proto) {
+		const f = NetworkModule.IFACE_FIELDS;
+		return [...(f[proto] || []), ...f._common];
+	}
+
+	renderIfaceFields(proto, values = {}) {
+		const container = document.getElementById('iface-proto-fields');
+		if (!container) return;
+		const esc = v => this.core.escapeHtml(v ?? '');
+		const known = NetworkModule.IFACE_FIELDS[proto];
+		const note = known
+			? ''
+			: `<p style="color:var(--steel-muted);font-size:12px">Protocol "${esc(proto)}" has no form here; only "start on boot" can be changed.</p>`;
+		container.innerHTML =
+			note +
+			this.ifaceFields(proto)
+				.map(f => {
+					const id = `edit-iface-opt-${f.key}`;
+					const raw = values[f.key];
+					const val = Array.isArray(raw) ? raw.join(' ') : raw;
+					let input;
+					if (f.type === 'bool') {
+						const on = (val ?? f.def) === '1';
+						return `<div class="form-group"><label class="form-label"><input type="checkbox" id="${id}" ${on ? 'checked' : ''} /> ${f.label}</label></div>`;
+					} else if (f.type === 'select') {
+						const cur = val ?? f.options[0][0];
+						// a configured value we don't list stays selectable, so saving keeps it
+						const opts = f.options.some(([v]) => v === cur) ? f.options : [...f.options, [cur, cur]];
+						input = `<select id="${id}" class="form-input">${opts
+							.map(
+								([v, l]) =>
+									`<option value="${esc(v)}" ${v === cur ? 'selected' : ''}>${esc(l)}</option>`
+							)
+							.join('')}</select>`;
+					} else {
+						const type = f.type === 'password' ? 'password' : 'text';
+						input = `<input type="${type}" id="${id}" class="form-input" value="${esc(val)}" placeholder="${esc(f.placeholder || '')}" autocomplete="off" />`;
+					}
+					return `<div class="form-group"><label class="form-label">${f.label}</label>${input}</div>`;
+				})
+				.join('');
+	}
+
+	setupInterfaceEditor() {
+		const proto = document.getElementById('edit-iface-proto');
+		proto?.addEventListener('change', () => this.renderIfaceFields(proto.value, this._ifaceValues || {}));
+		document.getElementById('add-interface-btn')?.addEventListener('click', () => this.editInterface(null));
+	}
+
 	async editInterface(id) {
 		try {
-			const [status, result] = await this.core.uciGet('network', id);
-			if (status !== 0 || !result?.values) throw new Error('Not found');
-			const c = result.values;
-			document.getElementById('edit-iface-name').value = id;
-			document.getElementById('edit-iface-proto').value = c.proto || 'dhcp';
-			document.getElementById('edit-iface-ipaddr').value = c.ipaddr || '';
-			document.getElementById('edit-iface-netmask').value = c.netmask || '';
-			document.getElementById('edit-iface-gateway').value = c.gateway || '';
-			document.getElementById('edit-iface-dns').value = Array.isArray(c.dns) ? c.dns.join(' ') : c.dns || '';
+			let c = {};
+			if (id) {
+				const [status, result] = await this.core.uciGet('network', id);
+				if (status !== 0 || !result?.values) throw new Error('Not found');
+				c = result.values;
+			}
+			this._ifaceValues = c;
+			this._ifaceOrigProto = c.proto || null;
+			document.getElementById('edit-iface-name').value = id || '';
+			document.getElementById('edit-iface-newname').value = '';
+			document.getElementById('edit-iface-newname-group').classList.toggle('hidden', !!id);
+			const select = document.getElementById('edit-iface-proto');
+			const proto = c.proto || (id ? 'none' : 'dhcp');
+			// keep protocols we have no form for selectable, so saving never rewrites them
+			select.querySelectorAll('option[data-extra]').forEach(o => o.remove());
+			if (![...select.options].some(o => o.value === proto)) {
+				const opt = new Option(`${proto} (as configured)`, proto);
+				opt.dataset.extra = '1';
+				select.add(opt);
+			}
+			select.value = proto;
+			document.querySelector('#interface-modal .modal-title').textContent = id
+				? `CONFIGURE INTERFACE: ${id.toUpperCase()}`
+				: 'ADD INTERFACE';
+			this.renderIfaceFields(proto, c);
 			this.core.openModal('interface-modal');
 		} catch {
 			this.core.showToast('Failed to load interface config', 'error');
@@ -281,24 +458,54 @@ export default class NetworkModule {
 	}
 
 	async saveInterface() {
-		const name = document.getElementById('edit-iface-name').value;
+		let name = document.getElementById('edit-iface-name').value;
+		const isNew = !name;
+		if (isNew) {
+			name = document.getElementById('edit-iface-newname').value.trim();
+			if (!/^[a-zA-Z0-9_]{1,15}$/.test(name)) {
+				this.core.showToast('Name: letters, digits and _ only (max 15)', 'error');
+				return;
+			}
+		}
 		const proto = document.getElementById('edit-iface-proto').value;
+		const fields = this.ifaceFields(proto);
 		const values = { proto };
-		if (proto === 'static') {
-			const ipaddr = document.getElementById('edit-iface-ipaddr').value;
-			const netmask = document.getElementById('edit-iface-netmask').value;
-			const gateway = document.getElementById('edit-iface-gateway').value;
-			const dns = document.getElementById('edit-iface-dns').value;
-			if (ipaddr) values.ipaddr = ipaddr;
-			if (netmask) values.netmask = netmask;
-			if (gateway) values.gateway = gateway;
-			if (dns) values.dns = dns.split(/\s+/);
+		const remove = new Set();
+		const existing = this._ifaceValues || {};
+		for (const f of fields) {
+			const el = document.getElementById(`edit-iface-opt-${f.key}`);
+			if (!el) continue;
+			if (f.type === 'bool') {
+				const v = el.checked ? '1' : '0';
+				if (v === f.def) remove.add(f.key);
+				else values[f.key] = v;
+				continue;
+			}
+			const v = el.value.trim();
+			// an untouched select still showing its default: don't add the option
+			if (f.type === 'select' && existing[f.key] === undefined && v === f.options[0][0]) continue;
+			if (!v) remove.add(f.key);
+			else if (f.type === 'list') values[f.key] = v.split(/[\s,]+/).filter(Boolean);
+			else values[f.key] = v;
+		}
+		// switching protocol: drop the old protocol's options the new one doesn't use
+		const old = this._ifaceOrigProto;
+		if (old && old !== proto) {
+			const keep = new Set(fields.map(f => f.key));
+			for (const f of this.ifaceFields(old)) if (!keep.has(f.key)) remove.add(f.key);
 		}
 		try {
+			if (isNew) {
+				const [st] = await this.core.uciAdd('network', 'interface', name);
+				if (st !== 0) throw new Error('add failed');
+			}
 			await this.core.uciSet('network', name, values);
+			for (const key of remove) {
+				if (existing[key] !== undefined) await this.core.uciDelete('network', name, key);
+			}
 			await this.core.uciCommit('network');
 			this.core.closeModal('interface-modal');
-			this.core.showToast('Interface updated', 'success');
+			this.core.showToast(isNew ? `Interface ${name} added` : 'Interface updated', 'success');
 			this.loadInterfaces();
 		} catch {
 			this.core.showToast('Failed to save interface', 'error');
