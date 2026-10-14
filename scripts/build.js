@@ -13,10 +13,12 @@ async function buildJS() {
 		'moci/js/modules/dashboard.js',
 		'moci/js/modules/network.js',
 		'moci/js/modules/system.js',
-		'moci/js/modules/addons.js'
+		'moci/js/modules/addons.js',
+		'moci/js/lib/uci-sections.js'
 	];
 
 	await mkdir(join(distDir, 'js/modules'), { recursive: true });
+	await mkdir(join(distDir, 'js/lib'), { recursive: true });
 
 	for (const file of files) {
 		const code = await readFile(file, 'utf8');

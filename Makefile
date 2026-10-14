@@ -10,6 +10,9 @@ PKG_LICENSE_FILES:=LICENSE
 
 include $(INCLUDE_DIR)/package.mk
 
+# minified bundle from `pnpm run build` when present, plain sources otherwise
+MOCI_SRC:=$(if $(wildcard $(CURDIR)/dist/moci),./dist/moci,./moci)
+
 define Package/moci
   SECTION:=admin
   CATEGORY:=Administration
@@ -29,22 +32,25 @@ endef
 
 define Package/moci/install
 	$(INSTALL_DIR) $(1)/www/moci
-	$(INSTALL_DATA) ./dist/moci/index.html $(1)/www/moci/
-	$(INSTALL_DATA) ./dist/moci/app.css $(1)/www/moci/
-	$(INSTALL_DATA) ./dist/moci/manifest.json $(1)/www/moci/
+	$(INSTALL_DATA) $(MOCI_SRC)/index.html $(1)/www/moci/
+	$(INSTALL_DATA) $(MOCI_SRC)/app.css $(1)/www/moci/
+	$(INSTALL_DATA) $(MOCI_SRC)/manifest.json $(1)/www/moci/
 
 	$(INSTALL_DIR) $(1)/www/moci/icons
-	$(INSTALL_DATA) ./dist/moci/icons/icon-192.png $(1)/www/moci/icons/
-	$(INSTALL_DATA) ./dist/moci/icons/icon-512.png $(1)/www/moci/icons/
+	$(INSTALL_DATA) $(MOCI_SRC)/icons/icon-192.png $(1)/www/moci/icons/
+	$(INSTALL_DATA) $(MOCI_SRC)/icons/icon-512.png $(1)/www/moci/icons/
 
 	$(INSTALL_DIR) $(1)/www/moci/js
-	$(INSTALL_DATA) ./dist/moci/js/core.js $(1)/www/moci/js/
+	$(INSTALL_DATA) $(MOCI_SRC)/js/core.js $(1)/www/moci/js/
 
 	$(INSTALL_DIR) $(1)/www/moci/js/modules
-	$(INSTALL_DATA) ./dist/moci/js/modules/dashboard.js $(1)/www/moci/js/modules/
-	$(INSTALL_DATA) ./dist/moci/js/modules/network.js $(1)/www/moci/js/modules/
-	$(INSTALL_DATA) ./dist/moci/js/modules/system.js $(1)/www/moci/js/modules/
-	$(INSTALL_DATA) ./dist/moci/js/modules/addons.js $(1)/www/moci/js/modules/
+	$(INSTALL_DATA) $(MOCI_SRC)/js/modules/dashboard.js $(1)/www/moci/js/modules/
+	$(INSTALL_DATA) $(MOCI_SRC)/js/modules/network.js $(1)/www/moci/js/modules/
+	$(INSTALL_DATA) $(MOCI_SRC)/js/modules/system.js $(1)/www/moci/js/modules/
+	$(INSTALL_DATA) $(MOCI_SRC)/js/modules/addons.js $(1)/www/moci/js/modules/
+
+	$(INSTALL_DIR) $(1)/www/moci/js/lib
+	$(INSTALL_DATA) $(MOCI_SRC)/js/lib/uci-sections.js $(1)/www/moci/js/lib/
 
 	$(INSTALL_DIR) $(1)/www/moci/js/addons
 

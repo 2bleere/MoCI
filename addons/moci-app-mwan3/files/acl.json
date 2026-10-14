@@ -1,0 +1,13 @@
+{
+	"moci-app-mwan3": {
+		"description": "MoCI add-on Multi-WAN: read mwan3 status, edit /etc/config/mwan3, reload or restart mwan3",
+		"read": {
+			"ubus": { "mwan3": ["status"] },
+			"uci": ["mwan3"]
+		},
+		"write": {
+			"uci": ["mwan3"],
+			"file": { "/etc/init.d/mwan3 restart": ["exec"] }
+		}
+	}
+}
