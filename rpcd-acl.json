@@ -69,7 +69,7 @@
 				"network.interface": ["up", "down"],
 				"moci": ["setPassword", "wgGenKey"]
 			},
-			"uci": ["network", "wireless", "firewall", "dhcp", "system", "qos", "ddns", "moci"]
+			"uci": ["network", "wireless", "firewall", "dhcp", "system", "qos", "sqm", "ddns", "moci"]
 		}
 	}
 }

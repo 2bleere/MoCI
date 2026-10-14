@@ -1747,6 +1747,16 @@ export default class NetworkModule {
 	}
 
 	async loadQoS() {
+		// SQM (sqm-scripts) replaces qos-scripts on current OpenWrt; use it when it is installed
+		const [sqmStatus, sqm] = await this.core.uciGet('sqm').catch(() => [1]);
+		const useSqm = sqmStatus === 0 && sqm?.values;
+		document.getElementById('sqm-section')?.classList.toggle('hidden', !useSqm);
+		document.getElementById('qos-scripts-section')?.classList.toggle('hidden', !!useSqm);
+		if (useSqm) {
+			this.setupSqm();
+			this.renderSqm(sqm.values);
+			return;
+		}
 		await this.core.loadResource('qos-rules-table', 6, 'qos', async () => {
 			const [status, result] = await this.core.uciGet('qos');
 			if (status !== 0 || !result?.values) throw new Error('No data');
@@ -1775,6 +1785,137 @@ export default class NetworkModule {
 				<td>${this.core.renderActionButtons(r.section)}</td>
 			</tr>`
 			);
+		});
+	}
+
+	static SQM_SCRIPTS = [
+		['piece_of_cake.qos', 'piece_of_cake (cake, one tier)'],
+		['layer_cake.qos', 'layer_cake (cake, DiffServ tiers)'],
+		['simple.qos', 'simple (fq_codel, three tiers)'],
+		['simplest.qos', 'simplest (fq_codel)'],
+		['simplest_tbf.qos', 'simplest_tbf (fq_codel + TBF)']
+	];
+
+	setupSqm() {
+		if (this._sqmReady) return;
+		this._sqmReady = true;
+		document.getElementById('add-sqm-queue-btn')?.addEventListener('click', () => this.addSqmQueue());
+		const cleanup = this.core.delegateActions('sqm-queues', {
+			'sqm-save': id => this.saveSqmQueue(id),
+			'sqm-delete': id => this.deleteSqmQueue(id)
+		});
+		if (cleanup) this.cleanups.push(cleanup);
+	}
+
+	renderSqm(config) {
+		const box = document.getElementById('sqm-queues');
+		if (!box) return;
+		const esc = v => this.core.escapeHtml(v ?? '');
+		const queues = this.core.filterUciSections(config, 'queue');
+		if (!queues.length) {
+			box.innerHTML = '<p style="color:var(--steel-muted)">No queues configured.</p>';
+			return;
+		}
+		const sel = (id, cur, opts) =>
+			`<select class="form-input" id="${id}">${opts
+				.map(([v, l]) => `<option value="${esc(v)}" ${v === cur ? 'selected' : ''}>${esc(l)}</option>`)
+				.join('')}</select>`;
+		box.innerHTML = queues
+			.map(q => {
+				const id = q.section;
+				const p = `sqm-${id}-`;
+				const scripts = NetworkModule.SQM_SCRIPTS.some(([v]) => v === q.script)
+					? NetworkModule.SQM_SCRIPTS
+					: [...NetworkModule.SQM_SCRIPTS, [q.script, q.script]];
+				return `<div class="stat-card" style="margin-bottom:16px">
+				<div class="section-title" style="display:flex;justify-content:space-between;align-items:center">
+					<span>${esc(id.toUpperCase())} ${q.enabled === '1' ? this.core.renderBadge('success', 'ACTIVE') : this.core.renderBadge('error', 'OFF')}</span>
+				</div>
+				<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:0 16px">
+					<div class="form-group"><label class="form-label"><input type="checkbox" id="${p}enabled" ${q.enabled === '1' ? 'checked' : ''} /> ENABLED</label></div>
+					<div class="form-group"><label class="form-label">INTERFACE (device)</label><input class="form-input" id="${p}interface" value="${esc(q.interface)}" placeholder="wan" /></div>
+					<div class="form-group"><label class="form-label">DOWNLOAD (kbit/s, 0 = off)</label><input type="number" class="form-input" id="${p}download" value="${esc(q.download)}" /></div>
+					<div class="form-group"><label class="form-label">UPLOAD (kbit/s, 0 = off)</label><input type="number" class="form-input" id="${p}upload" value="${esc(q.upload)}" /></div>
+					<div class="form-group"><label class="form-label">QUEUE DISCIPLINE</label>${sel(`${p}qdisc`, q.qdisc || 'cake', [
+						['cake', 'cake'],
+						['fq_codel', 'fq_codel']
+					])}</div>
+					<div class="form-group"><label class="form-label">SCRIPT</label>${sel(`${p}script`, q.script || 'piece_of_cake.qos', scripts)}</div>
+					<div class="form-group"><label class="form-label">LINK LAYER</label>${sel(`${p}linklayer`, q.linklayer || 'none', [
+						['none', 'None / default'],
+						['ethernet', 'Ethernet (VDSL, fibre, cable)'],
+						['atm', 'ATM (ADSL)']
+					])}</div>
+					<div class="form-group"><label class="form-label">PER-PACKET OVERHEAD (bytes)</label><input type="number" class="form-input" id="${p}overhead" value="${esc(q.overhead)}" placeholder="0" /></div>
+				</div>
+				<div class="action-buttons">
+					<button class="action-btn-sm" data-action="sqm-save" data-id="${esc(id)}">SAVE &amp; APPLY</button>
+					<button class="action-btn-sm danger" data-action="sqm-delete" data-id="${esc(id)}">DELETE</button>
+				</div>
+			</div>`;
+			})
+			.join('');
+	}
+
+	async saveSqmQueue(id) {
+		const v = k => document.getElementById(`sqm-${id}-${k}`);
+		const values = {
+			enabled: v('enabled').checked ? '1' : '0',
+			interface: v('interface').value.trim(),
+			download: v('download').value.trim() || '0',
+			upload: v('upload').value.trim() || '0',
+			qdisc: v('qdisc').value,
+			script: v('script').value,
+			linklayer: v('linklayer').value
+		};
+		if (!values.interface) {
+			this.core.showToast('Interface is required', 'error');
+			return;
+		}
+		try {
+			await this.core.uciSet('sqm', id, values);
+			const overhead = v('overhead').value.trim();
+			if (overhead) await this.core.uciSet('sqm', id, { overhead });
+			else await this.core.uciDelete('sqm', id, 'overhead');
+			await this.core.uciCommit('sqm');
+			await this.core.serviceReload('sqm');
+			this.core.showToast(`Queue ${id} saved`, 'success');
+			this.loadQoS();
+		} catch {
+			this.core.showToast('Failed to save queue', 'error');
+		}
+	}
+
+	async addSqmQueue() {
+		const name = prompt('Queue name (letters, digits, _):', 'wan');
+		if (!name) return;
+		if (!/^[a-zA-Z0-9_]+$/.test(name)) {
+			this.core.showToast('Invalid name', 'error');
+			return;
+		}
+		try {
+			const [st] = await this.core.uciAdd('sqm', 'queue', name);
+			if (st !== 0) throw new Error('exists');
+			await this.core.uciSet('sqm', name, {
+				enabled: '0',
+				interface: '',
+				download: '0',
+				upload: '0',
+				qdisc: 'cake',
+				script: 'piece_of_cake.qos',
+				linklayer: 'none'
+			});
+			await this.core.uciCommit('sqm');
+			this.loadQoS();
+		} catch {
+			this.core.showToast('Failed to add queue', 'error');
+		}
+	}
+
+	async deleteSqmQueue(id) {
+		await this.core.uciDeleteEntry('sqm', id, `Delete SQM queue "${id}"?`, async () => {
+			await this.core.serviceReload('sqm');
+			this.loadQoS();
 		});
 	}
 
