@@ -1,3 +1,4 @@
+import { renderFields, initFieldCombos, collectFields } from '../lib/uci-sections.js';
 const FORWARD_FIELDS = {
 	'edit-forward-name': 'name',
 	'edit-forward-proto': 'proto',
@@ -931,11 +932,123 @@ export default class NetworkModule {
 		this.core.uciDeleteEntry('network', id, 'Delete this static route?', () => this.loadRoutes());
 	}
 
+	static WIFI_CHANNELS = {
+		'2g': ['auto', ...Array.from({ length: 13 }, (_, i) => String(i + 1))],
+		'5g': [
+			'auto',
+			'36',
+			'40',
+			'44',
+			'48',
+			'52',
+			'56',
+			'60',
+			'64',
+			'100',
+			'104',
+			'108',
+			'112',
+			'116',
+			'120',
+			'124',
+			'128',
+			'132',
+			'136',
+			'140',
+			'144',
+			'149',
+			'153',
+			'157',
+			'161',
+			'165'
+		],
+		'6g': ['auto']
+	};
+	static WIFI_HTMODES = {
+		'2g': ['HT20', 'HT40'],
+		'5g': ['HT20', 'HT40', 'VHT20', 'VHT40', 'VHT80', 'VHT160'],
+		'6g': ['HE20', 'HE40', 'HE80', 'HE160']
+	};
+
+	wifiIfaceFields() {
+		return [
+			{ key: 'disabled', label: 'DISABLED', type: 'bool', def: '0' },
+			{ key: 'ssid', label: 'SSID' },
+			{
+				key: 'mode',
+				label: 'MODE',
+				type: 'select',
+				options: [
+					['ap', 'Access point'],
+					['sta', 'Client (connect to another network)'],
+					['mesh', 'Mesh point']
+				]
+			},
+			{
+				key: 'network',
+				label: 'ATTACH TO NETWORK',
+				type: 'multi',
+				options: () => (this._networkNames || []).map(n => [n, n])
+			},
+			{
+				key: 'encryption',
+				label: 'ENCRYPTION',
+				type: 'select',
+				options: [
+					['psk2+ccmp', 'WPA2-PSK (CCMP)'],
+					['psk2', 'WPA2-PSK'],
+					['sae-mixed', 'WPA2/WPA3 mixed'],
+					['sae', 'WPA3-SAE'],
+					['psk-mixed', 'WPA/WPA2 mixed'],
+					['owe', 'OWE (open, encrypted)'],
+					['none', 'None (open)']
+				]
+			},
+			{ key: 'key', label: 'PASSWORD (leave empty to keep the current one)', type: 'password' },
+			{ key: 'hidden', label: 'HIDE SSID', type: 'bool', def: '0' },
+			{ key: 'isolate', label: 'ISOLATE CLIENTS', type: 'bool', def: '0' },
+			{ key: 'ieee80211r', label: 'FAST ROAMING (802.11r)', type: 'bool', def: '0' }
+		];
+	}
+
+	wifiRadioFields(band) {
+		const b = NetworkModule.WIFI_CHANNELS[band] ? band : '2g';
+		return [
+			{ key: 'disabled', label: 'RADIO DISABLED', type: 'bool', def: '0' },
+			{
+				key: 'channel',
+				label: 'CHANNEL',
+				type: 'select',
+				options: NetworkModule.WIFI_CHANNELS[b].map(c => [c, c === 'auto' ? 'Auto' : c])
+			},
+			{
+				key: 'htmode',
+				label: 'CHANNEL WIDTH',
+				type: 'select',
+				options: NetworkModule.WIFI_HTMODES[b].map(m => [m, m])
+			},
+			{ key: 'txpower', label: 'TX POWER (dBm, empty = driver default)', type: 'number' },
+			{ key: 'country', label: 'COUNTRY CODE', placeholder: 'US' },
+			{
+				key: 'cell_density',
+				label: 'CELL DENSITY',
+				type: 'select',
+				options: [
+					['0', 'Disabled'],
+					['1', 'Normal'],
+					['2', 'High'],
+					['3', 'Very high']
+				]
+			}
+		];
+	}
+
 	async loadWireless() {
 		await this.core.loadResource('wireless-table', 6, 'wireless', async () => {
 			const [status, result] = await this.core.uciGet('wireless');
 			if (status !== 0 || !result?.values) throw new Error('No data');
 			const config = result.values;
+			this._wifiCfg = config;
 			const radios = {};
 			const ifaces = [];
 
@@ -944,70 +1057,167 @@ export default class NetworkModule {
 				if (val['.type'] === 'wifi-iface') ifaces.push({ section: key, ...val });
 			}
 
+			const addSel = document.getElementById('add-wifi-radio');
+			if (addSel) {
+				addSel.innerHTML = Object.entries(radios)
+					.map(
+						([k, r]) =>
+							`<option value="${this.core.escapeHtml(k)}">${this.core.escapeHtml(k)} (${this.core.escapeHtml(r.band || '?')})</option>`
+					)
+					.join('');
+			}
+			if (!this._wifiAddBound) {
+				this._wifiAddBound = true;
+				document.getElementById('add-wifi-btn')?.addEventListener('click', () => this.addWireless());
+			}
+
 			this.core.renderTable('#wireless-table', ifaces, 6, 'No wireless interfaces found', iface => {
 				const radio = radios[iface.device] || {};
-				const disabled = iface.disabled === '1';
+				const disabled = iface.disabled === '1' || radio.disabled === '1';
 				return `<tr>
-					<td>${this.core.escapeHtml(iface.device || 'N/A')}</td>
-					<td>${this.core.escapeHtml(iface.ssid || 'N/A')}</td>
-					<td>${this.core.escapeHtml(radio.channel || 'auto')}</td>
+					<td>${this.core.escapeHtml(iface.device || 'N/A')} ${this.core.escapeHtml(radio.band ? `(${radio.band})` : '')}</td>
+					<td>${this.core.escapeHtml(iface.ssid || 'N/A')}${iface.mode && iface.mode !== 'ap' ? ` <span style="color:var(--steel-muted)">${this.core.escapeHtml(iface.mode)}</span>` : ''}</td>
+					<td>${this.core.escapeHtml(radio.channel || 'auto')} ${this.core.escapeHtml(radio.htmode || '')}</td>
 					<td>${disabled ? this.core.renderBadge('error', 'DISABLED') : this.core.renderBadge('success', 'ENABLED')}</td>
 					<td>${this.core.escapeHtml(iface.encryption || 'none').toUpperCase()}</td>
 					<td>${this.core.renderActionButtons(iface.section)}</td>
 				</tr>`;
 			});
 		});
+		this.loadWifiClients();
+	}
+
+	async loadWifiClients() {
+		const tbody = document.querySelector('#wifi-clients-table tbody');
+		if (!tbody) return;
+		try {
+			const [ds, dr] = await this.core.ubusCall('iwinfo', 'devices', {});
+			if (ds !== 0) throw new Error('iwinfo unavailable');
+			const leases = {};
+			const [ls, lr] = await this.core.ubusCall('moci', 'getDHCPLeases', {}).catch(() => [1]);
+			if (ls === 0)
+				for (const l of lr?.dhcp_leases || []) leases[l.macaddr.toLowerCase()] = l.hostname || l.ipaddr;
+			const rows = [];
+			for (const dev of dr?.devices || []) {
+				const [[as, ar], [, info]] = await Promise.all([
+					this.core.ubusCall('iwinfo', 'assoclist', { device: dev }).catch(() => [1]),
+					this.core.ubusCall('iwinfo', 'info', { device: dev }).catch(() => [1])
+				]);
+				if (as !== 0) continue;
+				for (const c of ar?.results || []) rows.push({ net: `${info?.ssid || dev} (${dev})`, ...c });
+			}
+			const rate = r => (r?.rate ? `${(r.rate / 1000).toFixed(0)} Mbit/s` : '-');
+			this.core.renderTable(
+				'#wifi-clients-table',
+				rows,
+				6,
+				'No clients connected',
+				c => `<tr>
+				<td>${this.core.escapeHtml(c.net)}</td>
+				<td>${this.core.escapeHtml(leases[String(c.mac).toLowerCase()] || '-')}</td>
+				<td style="font-size:12px">${this.core.escapeHtml(c.mac)}</td>
+				<td>${this.core.escapeHtml(c.signal)} dBm</td>
+				<td>${rate(c.rx)} / ${rate(c.tx)}</td>
+				<td>${c.connected_time ? this.core.escapeHtml(this.core.formatUptime(c.connected_time)) : '-'}</td>
+			</tr>`
+			);
+		} catch {
+			this.core.renderEmptyTable(tbody, 6, 'Client list unavailable');
+		}
 	}
 
 	async editWireless(id) {
 		try {
-			const [status, result] = await this.core.uciGet('wireless', id);
-			if (status !== 0 || !result?.values) throw new Error('Not found');
-			const c = result.values;
+			const [status, result] = await this.core.uciGet('wireless');
+			if (status !== 0 || !result?.values?.[id]) throw new Error('Not found');
+			await this.loadNetworkNames();
+			const cfg = result.values;
+			const c = cfg[id];
+			const radio = cfg[c.device] || {};
+			this._wifiEdit = { cfg, iface: c, radio, band: radio.band };
 			document.getElementById('edit-wifi-section').value = id;
 			document.getElementById('edit-wifi-radio').value = c.device || '';
-			document.getElementById('edit-wifi-ssid').value = c.ssid || '';
-			document.getElementById('edit-wifi-encryption').value = c.encryption || 'none';
-			document.getElementById('edit-wifi-key').value = c.key || '';
-			document.getElementById('edit-wifi-disabled').value = c.disabled || '0';
-			document.getElementById('edit-wifi-hidden').value = c.hidden || '0';
-
-			if (c.device) {
-				const [rs, rr] = await this.core.uciGet('wireless', c.device);
-				if (rs === 0 && rr?.values) {
-					document.getElementById('edit-wifi-channel').value = rr.values.channel || 'auto';
-					document.getElementById('edit-wifi-txpower').value = rr.values.txpower || '';
-				}
-			}
+			document.getElementById('wifi-radio-name').textContent = c.device
+				? `${c.device} (${radio.band || '?'})`
+				: '';
+			// lists need array form for the network combobox
+			const ifaceValues = { ...c, network: c.network ? String(c.network).split(/\s+/) : [], key: '' };
+			document.getElementById('wifi-iface-fields').innerHTML = renderFields(
+				this.core,
+				'wifi-if',
+				this.wifiIfaceFields(),
+				ifaceValues,
+				cfg
+			);
+			this._wifiCombos = initFieldCombos(this.core, 'wifi-if', this.wifiIfaceFields(), ifaceValues, cfg);
+			document.getElementById('wifi-radio-fields').innerHTML = renderFields(
+				this.core,
+				'wifi-radio',
+				this.wifiRadioFields(radio.band),
+				radio,
+				cfg
+			);
 			this.core.openModal('wireless-modal');
 		} catch {
 			this.core.showToast('Failed to load wireless config', 'error');
 		}
 	}
 
+	async addWireless() {
+		const radio = document.getElementById('add-wifi-radio')?.value;
+		if (!radio) return;
+		try {
+			const [st, res] = await this.core.uciAdd('wireless', 'wifi-iface');
+			if (st !== 0 || !res?.section) throw new Error('add failed');
+			// created disabled; it only goes live when saved enabled
+			await this.core.uciSet('wireless', res.section, {
+				device: radio,
+				mode: 'ap',
+				network: 'lan',
+				ssid: 'OpenWrt',
+				encryption: 'psk2+ccmp',
+				disabled: '1'
+			});
+			await this.core.uciCommit('wireless');
+			await this.loadWireless();
+			this.editWireless(res.section);
+		} catch {
+			this.core.showToast('Failed to add network', 'error');
+		}
+	}
+
 	async saveWireless() {
 		const section = document.getElementById('edit-wifi-section').value;
 		const radio = document.getElementById('edit-wifi-radio').value;
-		const values = {
-			ssid: document.getElementById('edit-wifi-ssid').value,
-			encryption: document.getElementById('edit-wifi-encryption').value,
-			disabled: document.getElementById('edit-wifi-disabled').value,
-			hidden: document.getElementById('edit-wifi-hidden').value
-		};
-		const key = document.getElementById('edit-wifi-key').value;
-		if (key && values.encryption !== 'none') values.key = key;
-
+		const { cfg, iface, radio: radioCfg, band } = this._wifiEdit || {};
+		const existing = { ...iface, network: iface?.network };
+		const ifc = collectFields('wifi-if', this.wifiIfaceFields(), existing, cfg, this._wifiCombos);
+		// network is a space-separated option in wireless, not a list
+		if (ifc.values.network) ifc.values.network = ifc.values.network.join(' ');
+		// an empty password field keeps the stored key
+		ifc.remove = ifc.remove.filter(k => k !== 'key');
+		const enc = ifc.values.encryption || iface?.encryption || 'none';
+		if (enc === 'none' || enc === 'owe') {
+			if (iface?.key !== undefined) ifc.remove.push('key');
+			delete ifc.values.key;
+		} else if (!ifc.values.key && !iface?.key) {
+			this.core.showToast('Enter a password for this encryption', 'error');
+			return;
+		} else if (ifc.values.key && ifc.values.key.length < 8) {
+			this.core.showToast('The password needs at least 8 characters', 'error');
+			return;
+		}
+		if (!ifc.values.ssid && !iface?.ssid) {
+			this.core.showToast('SSID is required', 'error');
+			return;
+		}
+		const rad = collectFields('wifi-radio', this.wifiRadioFields(band), radioCfg || {}, cfg);
 		try {
-			await this.core.uciSet('wireless', section, values);
+			await this.core.uciSet('wireless', section, ifc.values);
+			for (const k of ifc.remove) await this.core.uciDelete('wireless', section, k);
 			if (radio) {
-				const radioValues = {};
-				const channel = document.getElementById('edit-wifi-channel').value;
-				const txpower = document.getElementById('edit-wifi-txpower').value;
-				if (channel) radioValues.channel = channel;
-				if (txpower) radioValues.txpower = txpower;
-				if (Object.keys(radioValues).length) {
-					await this.core.uciSet('wireless', radio, radioValues);
-				}
+				if (Object.keys(rad.values).length) await this.core.uciSet('wireless', radio, rad.values);
+				for (const k of rad.remove) await this.core.uciDelete('wireless', radio, k);
 			}
 			await this.core.uciCommit('wireless');
 			this.core.closeModal('wireless-modal');

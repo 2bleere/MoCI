@@ -539,75 +539,17 @@
 									<button class="modal-close" id="close-wireless-modal">&times;</button>
 								</div>
 								<form class="modal-body" onsubmit="return false;">
-									<input type="hidden" id="edit-wifi-radio" />
 									<input type="hidden" id="edit-wifi-section" />
-
-									<div class="form-group">
-										<label class="form-label">ENABLED</label>
-										<select id="edit-wifi-disabled" class="form-input">
-											<option value="0">Yes</option>
-											<option value="1">No (Disabled)</option>
-										</select>
+									<input type="hidden" id="edit-wifi-radio" />
+									<div class="section-title">NETWORK</div>
+									<div id="wifi-iface-fields"></div>
+									<div class="section-title" style="margin-top: 16px">
+										RADIO <span id="wifi-radio-name" style="color: var(--steel-muted)"></span>
 									</div>
-
-									<div class="form-group">
-										<label class="form-label">SSID (NETWORK NAME)</label>
-										<input
-											type="text"
-											id="edit-wifi-ssid"
-											class="form-input"
-											placeholder="MyNetwork"
-											autocomplete="off"
-										/>
-									</div>
-
-									<div class="form-group">
-										<label class="form-label">ENCRYPTION</label>
-										<select id="edit-wifi-encryption" class="form-input">
-											<option value="none">None (Open)</option>
-											<option value="psk2">WPA2-PSK</option>
-											<option value="psk-mixed">WPA/WPA2-PSK Mixed</option>
-											<option value="sae">WPA3-SAE</option>
-											<option value="sae-mixed">WPA2/WPA3-SAE Mixed</option>
-										</select>
-									</div>
-
-									<div class="form-group" id="wifi-key-group">
-										<label class="form-label">PASSWORD</label>
-										<input
-											type="password"
-											id="edit-wifi-key"
-											class="form-input"
-											placeholder="Enter password (8+ characters)"
-											autocomplete="new-password"
-										/>
-									</div>
-
-									<div class="form-group">
-										<label class="form-label">CHANNEL</label>
-										<select id="edit-wifi-channel" class="form-input">
-											<option value="auto">Auto</option>
-										</select>
-									</div>
-
-									<div class="form-group">
-										<label class="form-label">TRANSMIT POWER</label>
-										<select id="edit-wifi-txpower" class="form-input">
-											<option value="">Default</option>
-											<option value="10">Low (10 dBm)</option>
-											<option value="15">Medium (15 dBm)</option>
-											<option value="20">High (20 dBm)</option>
-											<option value="25">Maximum (25 dBm)</option>
-										</select>
-									</div>
-
-									<div class="form-group">
-										<label class="form-label">HIDDEN SSID</label>
-										<select id="edit-wifi-hidden" class="form-input">
-											<option value="0">No (Broadcast SSID)</option>
-											<option value="1">Yes (Hidden)</option>
-										</select>
-									</div>
+									<p style="color: var(--steel-muted); font-size: 12px">
+										Radio settings are shared by every network on this radio.
+									</p>
+									<div id="wifi-radio-fields"></div>
 								</form>
 								<div class="modal-footer">
 									<button class="action-btn" id="cancel-wireless-btn">CANCEL</button>
@@ -618,6 +560,10 @@
 
 						<div class="tab-content hidden" id="tab-wireless">
 							<div class="stat-card">
+								<div style="display: flex; gap: 8px; margin-bottom: 16px; align-items: center">
+									<select id="add-wifi-radio" class="form-input" style="max-width: 220px"></select>
+									<button class="action-btn" id="add-wifi-btn">+ ADD NETWORK</button>
+								</div>
 								<table class="data-table" id="wireless-table">
 									<thead>
 										<tr>
@@ -636,6 +582,22 @@
 											</td>
 										</tr>
 									</tbody>
+								</table>
+							</div>
+							<div class="stat-card" style="margin-top: 24px">
+								<div class="section-title">CONNECTED CLIENTS</div>
+								<table class="data-table" id="wifi-clients-table">
+									<thead>
+										<tr>
+											<th>NETWORK</th>
+											<th>HOST</th>
+											<th>MAC</th>
+											<th>SIGNAL</th>
+											<th>RX / TX RATE</th>
+											<th>CONNECTED</th>
+										</tr>
+									</thead>
+									<tbody></tbody>
 								</table>
 							</div>
 						</div>
