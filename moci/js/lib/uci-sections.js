@@ -6,6 +6,91 @@
 //          options: [[value, label]] | (cfg) => [[value, label]], help }
 //   list  = space/comma separated text stored as a UCI list
 //   multi = ordered choice of options stored as a UCI list (order is kept)
+
+const fieldOptions = (f, cfg) => (typeof f.options === 'function' ? f.options(cfg) : f.options || []);
+
+// HTML for a list of fields; ids are `${uid}-f-${key}`
+export function renderFields(core, uid, fields, values, cfg) {
+	const esc = v => core.escapeHtml(v ?? '');
+	return fields
+		.map(f => {
+			const fid = `${uid}-f-${f.key}`;
+			const raw = values[f.key];
+			const help = f.help
+				? `<div style="color:var(--steel-muted);font-size:12px;margin-top:4px">${f.help}</div>`
+				: '';
+			if (f.type === 'bool') {
+				const on = (raw ?? f.def ?? '0') === '1';
+				return `<div class="form-group"><label class="form-label"><input type="checkbox" id="${fid}" ${on ? 'checked' : ''} /> ${esc(f.label)}</label>${help}</div>`;
+			}
+			let input;
+			if (f.type === 'select') {
+				let opts = fieldOptions(f, cfg);
+				const cur = raw ?? f.def ?? opts[0]?.[0] ?? '';
+				if (!opts.some(([v]) => v === cur)) opts = [...opts, [cur, cur]];
+				input = `<select class="form-input" id="${fid}">${opts.map(([v, l]) => `<option value="${esc(v)}" ${v === cur ? 'selected' : ''}>${esc(l)}</option>`).join('')}</select>`;
+			} else if (f.type === 'multi') {
+				input = `<div id="${fid}"></div>`;
+			} else if (f.type === 'textarea') {
+				const val = Array.isArray(raw) ? raw.join('\n') : (raw ?? '');
+				input = `<textarea class="form-input" id="${fid}" rows="${f.rows || 4}" placeholder="${esc(f.placeholder ?? '')}">${esc(val)}</textarea>`;
+			} else {
+				const val = Array.isArray(raw) ? raw.join(' ') : (raw ?? '');
+				const type = f.type === 'password' ? 'password' : f.type === 'number' ? 'number' : 'text';
+				input = `<input class="form-input" type="${type}" id="${fid}" value="${esc(val)}" placeholder="${esc(f.placeholder ?? f.def ?? '')}" autocomplete="off" />`;
+			}
+			return `<div class="form-group"><label class="form-label">${esc(f.label)}</label>${input}${help}</div>`;
+		})
+		.join('');
+}
+
+// comboboxes for 'multi' fields, after renderFields' HTML is in the DOM
+export function initFieldCombos(core, uid, fields, values, cfg) {
+	const combos = {};
+	for (const f of fields.filter(f => f.type === 'multi')) {
+		const combo = core.createCombobox(`${uid}-f-${f.key}`, { placeholder: f.placeholder || 'Choose...' });
+		combo.setOptions(fieldOptions(f, cfg).map(([v]) => v));
+		const cur = values[f.key];
+		combo.setSelected(Array.isArray(cur) ? cur : cur ? [cur] : []);
+		combos[f.key] = combo;
+	}
+	return combos;
+}
+
+// { values to set, option names to delete } relative to the existing section values
+export function collectFields(uid, fields, existing, cfg, combos = {}) {
+	const values = {};
+	const remove = [];
+	for (const f of fields) {
+		if (f.type === 'multi') {
+			const sel = combos[f.key]?.getSelected() || [];
+			if (sel.length) values[f.key] = sel;
+			else remove.push(f.key);
+			continue;
+		}
+		const el = document.getElementById(`${uid}-f-${f.key}`);
+		if (!el) continue;
+		if (f.type === 'bool') {
+			const v = el.checked ? '1' : '0';
+			if (v === (f.def ?? '0') && existing[f.key] === undefined) continue;
+			values[f.key] = v;
+			continue;
+		}
+		const v = el.value.trim();
+		if (f.type === 'select' && existing[f.key] === undefined && v === (f.def ?? fieldOptions(f, cfg)[0]?.[0]))
+			continue;
+		if (v === '') remove.push(f.key);
+		else if (f.type === 'list') values[f.key] = v.split(/[\s,]+/).filter(Boolean);
+		else if (f.type === 'textarea' && f.list)
+			values[f.key] = v
+				.split('\n')
+				.map(l => l.trim())
+				.filter(Boolean);
+		else values[f.key] = v;
+	}
+	return { values, remove: remove.filter(k => existing[k] !== undefined) };
+}
+
 export class UciSectionTable {
 	constructor(core, opts) {
 		this.core = core;
@@ -89,10 +174,6 @@ export class UciSectionTable {
 		document.getElementById(`${this.uid}-save`).addEventListener('click', () => this.save());
 	}
 
-	options(f) {
-		return typeof f.options === 'function' ? f.options(this.cfg) : f.options || [];
-	}
-
 	open(id) {
 		this.editing = id;
 		const values = id ? this.cfg[id] || {} : { ...(this.o.defaults || {}) };
@@ -105,75 +186,13 @@ export class UciSectionTable {
 			!id && this.o.named
 				? `<div class="form-group"><label class="form-label">NAME</label><input class="form-input" id="${this.uid}-name" placeholder="letters, digits, _" /></div>`
 				: '';
-		this.combos = {};
-		body.innerHTML =
-			nameField +
-			this.o.fields
-				.map(f => {
-					const fid = `${this.uid}-f-${f.key}`;
-					const raw = values[f.key];
-					const help = f.help
-						? `<div style="color:var(--steel-muted);font-size:12px;margin-top:4px">${f.help}</div>`
-						: '';
-					if (f.type === 'bool') {
-						const on = (raw ?? f.def ?? '0') === '1';
-						return `<div class="form-group"><label class="form-label"><input type="checkbox" id="${fid}" ${on ? 'checked' : ''} /> ${this.esc(f.label)}</label>${help}</div>`;
-					}
-					let input;
-					if (f.type === 'select') {
-						let opts = this.options(f);
-						const cur = raw ?? f.def ?? opts[0]?.[0] ?? '';
-						if (!opts.some(([v]) => v === cur)) opts = [...opts, [cur, cur]];
-						input = `<select class="form-input" id="${fid}">${opts.map(([v, l]) => `<option value="${this.esc(v)}" ${v === cur ? 'selected' : ''}>${this.esc(l)}</option>`).join('')}</select>`;
-					} else if (f.type === 'multi') {
-						input = `<div id="${fid}"></div>`;
-					} else {
-						const val = Array.isArray(raw) ? raw.join(' ') : (raw ?? '');
-						const type = f.type === 'password' ? 'password' : f.type === 'number' ? 'number' : 'text';
-						input = `<input class="form-input" type="${type}" id="${fid}" value="${this.esc(val)}" placeholder="${this.esc(f.placeholder ?? f.def ?? '')}" autocomplete="off" />`;
-					}
-					return `<div class="form-group"><label class="form-label">${this.esc(f.label)}</label>${input}${help}</div>`;
-				})
-				.join('');
-		for (const f of this.o.fields.filter(f => f.type === 'multi')) {
-			const combo = this.core.createCombobox(`${this.uid}-f-${f.key}`, {
-				placeholder: f.placeholder || 'Choose...'
-			});
-			combo.setOptions(this.options(f).map(([v]) => v));
-			const cur = values[f.key];
-			combo.setSelected(Array.isArray(cur) ? cur : cur ? [cur] : []);
-			this.combos[f.key] = combo;
-		}
+		body.innerHTML = nameField + renderFields(this.core, this.uid, this.o.fields, values, this.cfg);
+		this.combos = initFieldCombos(this.core, this.uid, this.o.fields, values, this.cfg);
 		this.core.openModal(`${this.uid}-modal`);
 	}
 
 	collect() {
-		const values = {};
-		const remove = [];
-		const existing = this.current || {};
-		for (const f of this.o.fields) {
-			if (f.type === 'multi') {
-				const sel = this.combos[f.key]?.getSelected() || [];
-				if (sel.length) values[f.key] = sel;
-				else remove.push(f.key);
-				continue;
-			}
-			const el = document.getElementById(`${this.uid}-f-${f.key}`);
-			if (!el) continue;
-			if (f.type === 'bool') {
-				const v = el.checked ? '1' : '0';
-				if (v === (f.def ?? '0') && existing[f.key] === undefined) continue;
-				values[f.key] = v;
-				continue;
-			}
-			const v = el.value.trim();
-			if (f.type === 'select' && existing[f.key] === undefined && v === (f.def ?? this.options(f)[0]?.[0]))
-				continue;
-			if (v === '') remove.push(f.key);
-			else if (f.type === 'list') values[f.key] = v.split(/[\s,]+/).filter(Boolean);
-			else values[f.key] = v;
-		}
-		return { values, remove: remove.filter(k => existing[k] !== undefined) };
+		return collectFields(this.uid, this.o.fields, this.current || {}, this.cfg, this.combos);
 	}
 
 	async save() {
@@ -248,5 +267,58 @@ export class UciSectionTable {
 	async commit() {
 		await this.core.uciCommit(this.o.config);
 		if (this.o.onChange) await this.o.onChange();
+	}
+}
+
+// Inline settings form for ONE existing (or to-be-created) named section.
+export class UciSectionForm {
+	constructor(core, opts) {
+		this.core = core;
+		this.o = { saveLabel: 'SAVE', ...opts };
+		this.uid = `usf-${opts.config}-${opts.section}-${Math.random().toString(36).slice(2, 7)}`;
+		this.combos = {};
+	}
+
+	// cfg = result.values of uci get for the whole config
+	render(cfg) {
+		this.cfg = cfg || {};
+		const el = typeof this.o.container === 'string' ? document.getElementById(this.o.container) : this.o.container;
+		if (!el) return;
+		this.current = this.cfg[this.o.section] || {};
+		const esc = v => this.core.escapeHtml(v ?? '');
+		el.innerHTML = `
+			${this.o.title ? `<div class="section-title">${esc(this.o.title)}</div>` : ''}
+			${this.o.help ? `<p style="color:var(--steel-muted);font-size:13px;margin-bottom:12px">${this.o.help}</p>` : ''}
+			<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(${this.o.minColumn || 260}px,1fr));gap:0 16px">
+				${renderFields(this.core, this.uid, this.o.fields, this.current, this.cfg)}
+			</div>
+			<button class="action-btn" id="${this.uid}-save">${esc(this.o.saveLabel)}</button>`;
+		this.combos = initFieldCombos(this.core, this.uid, this.o.fields, this.current, this.cfg);
+		document.getElementById(`${this.uid}-save`).addEventListener('click', () => this.save());
+	}
+
+	async save() {
+		const { values, remove } = collectFields(this.uid, this.o.fields, this.current, this.cfg, this.combos);
+		if (this.o.validate) {
+			const err = this.o.validate(values);
+			if (err) {
+				this.core.showToast(err, 'error');
+				return;
+			}
+		}
+		try {
+			if (!this.cfg[this.o.section]) {
+				const [st] = await this.core.uciAdd(this.o.config, this.o.type, this.o.section);
+				if (st !== 0) throw new Error('create failed');
+			}
+			if (Object.keys(values).length) await this.core.uciSet(this.o.config, this.o.section, values);
+			for (const key of remove) await this.core.uciDelete(this.o.config, this.o.section, key);
+			await this.core.uciCommit(this.o.config);
+			if (this.o.onChange) await this.o.onChange();
+			this.core.showToast('Saved', 'success');
+		} catch (e) {
+			console.error(e);
+			this.core.showToast('Failed to save', 'error');
+		}
 	}
 }

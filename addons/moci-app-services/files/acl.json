@@ -1,0 +1,15 @@
+{
+	"moci-app-services": {
+		"description": "MoCI add-on Services: edit upnpd, snmpd, watchcat, openvpn and keepalived settings, control those services, import OpenVPN profiles",
+		"read": {
+			"ubus": { "rc": ["list"], "service": ["list"] },
+			"uci": ["upnpd", "snmpd", "watchcat", "openvpn", "keepalived", "network"],
+			"file": { "/var/run/miniupnpd.leases": ["read"] }
+		},
+		"write": {
+			"ubus": { "rc": ["init"] },
+			"uci": ["upnpd", "snmpd", "watchcat", "openvpn", "keepalived"],
+			"file": { "/etc/openvpn/*.ovpn": ["write"] }
+		}
+	}
+}

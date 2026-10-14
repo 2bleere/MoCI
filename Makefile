@@ -51,6 +51,7 @@ define Package/moci/install
 
 	$(INSTALL_DIR) $(1)/www/moci/js/lib
 	$(INSTALL_DATA) $(MOCI_SRC)/js/lib/uci-sections.js $(1)/www/moci/js/lib/
+	$(INSTALL_DATA) $(MOCI_SRC)/js/lib/service-control.js $(1)/www/moci/js/lib/
 
 	$(INSTALL_DIR) $(1)/www/moci/js/addons
 

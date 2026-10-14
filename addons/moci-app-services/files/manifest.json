@@ -1,0 +1,11 @@
+{
+	"id": "services",
+	"entry": "addon.js",
+	"name": "Services",
+	"version": "1.0.0",
+	"description": "UPnP/NAT-PMP, SNMP, Watchcat, OpenVPN and keepalived (VRRP) pages.",
+	"author": { "name": "2bleere" },
+	"license": "MIT",
+	"files": ["addon.js"],
+	"nav": { "route": "/services", "label": "SERVICES", "placement": "top" }
+}
