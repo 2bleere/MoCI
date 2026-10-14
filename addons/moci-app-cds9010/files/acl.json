@@ -1,0 +1,18 @@
+{
+	"moci-app-cds9010": {
+		"description": "MoCI add-on CDS-9010: read battery/cellular status, reset the modem or switch SIM, edit and test power alerts",
+		"read": {
+			"uci": ["cds9010"],
+			"file": { "/usr/libexec/cds9010-status": ["exec"] }
+		},
+		"write": {
+			"uci": ["cds9010"],
+			"file": {
+				"/usr/sbin/lte-ctl restart": ["exec"],
+				"/usr/sbin/lte-ctl sim1": ["exec"],
+				"/usr/sbin/lte-ctl sim2": ["exec"],
+				"/sbin/start-stop-daemon -S -b -x /usr/libexec/cds9010-alert -- test": ["exec"]
+			}
+		}
+	}
+}

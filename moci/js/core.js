@@ -62,7 +62,9 @@ export class OpenWrtCore {
 			for (const [routePath, handler] of this.routes) {
 				if (fullPath === routePath || fullPath.startsWith(routePath + '/')) {
 					await handler(fullPath, subPaths);
-					const addonPage = document.getElementById(`addon-${basePath}-page`);
+					// an add-on's route need not match its id: show the page of the add-on owning the route
+					const addonId = this.addonRouteMap.get(basePath) || basePath;
+					const addonPage = document.getElementById(`addon-${addonId}-page`);
 					if (addonPage) addonPage.classList.remove('hidden');
 					this.currentRoute = fullPath;
 					return;
@@ -70,7 +72,8 @@ export class OpenWrtCore {
 			}
 
 			const pageElement =
-				document.getElementById(`${basePath}-page`) || document.getElementById(`addon-${basePath}-page`);
+				document.getElementById(`${basePath}-page`) ||
+				document.getElementById(`addon-${this.addonRouteMap.get(basePath) || basePath}-page`);
 			if (pageElement) {
 				pageElement.classList.remove('hidden');
 				this.currentRoute = fullPath;

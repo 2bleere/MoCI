@@ -1,0 +1,11 @@
+{
+	"id": "cds9010",
+	"entry": "addon.js",
+	"name": "CDS-9010 Device",
+	"version": "1.0.0",
+	"description": "DataRemote CDS-9010: battery backup state, LTE modem reset and SIM selection, power-loss SMS/e-mail alerts.",
+	"author": { "name": "2bleere" },
+	"license": "MIT",
+	"files": ["addon.js"],
+	"nav": { "route": "/device", "label": "DEVICE", "placement": "top" }
+}
