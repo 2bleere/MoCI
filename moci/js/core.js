@@ -447,8 +447,42 @@ export class OpenWrtCore {
 		return this.ubusCall('uci', 'delete', params);
 	}
 
+	// configs whose mistakes can cut the browser off from the router
+	static ROLLBACK_CONFIGS = new Set(['network', 'firewall', 'wireless', 'mwan3']);
+	static ROLLBACK_TIMEOUT = 60;
+
 	uciCommit(config) {
+		if (OpenWrtCore.ROLLBACK_CONFIGS.has(config)) return this.uciApplyWithRollback();
 		return this.ubusCall('uci', 'commit', { config });
+	}
+
+	// Like LuCI: apply the session's staged changes and have rpcd undo them unless we can
+	// still reach the router and confirm within ROLLBACK_TIMEOUT seconds.
+	async uciApplyWithRollback() {
+		const timeout = OpenWrtCore.ROLLBACK_TIMEOUT;
+		let [st] = await this.ubusCall('uci', 'apply', { rollback: true, timeout });
+		if (st === 5) return [0]; // nothing staged
+		if (st !== 0) {
+			// a previous apply may still be waiting for confirmation: confirm it and retry once
+			await this.ubusCall('uci', 'confirm', {}).catch(() => {});
+			[st] = await this.ubusCall('uci', 'apply', { rollback: true, timeout });
+			if (st === 5) return [0];
+			if (st !== 0) throw new Error(`uci apply failed (${st})`);
+		}
+		this.showToast(`Applying... changes are undone in ${timeout} s if the router becomes unreachable`, 'info');
+		const deadline = Date.now() + (timeout - 5) * 1000;
+		await new Promise(r => setTimeout(r, 3000));
+		while (Date.now() < deadline) {
+			try {
+				const [cs] = await this.ubusCall('uci', 'confirm', {}, { timeout: 4000 });
+				if (cs === 0) return [0];
+			} catch {
+				// unreachable for now (network or wifi restarting): keep trying
+			}
+			await new Promise(r => setTimeout(r, 2000));
+		}
+		this.showToast('Lost contact with the router: it will undo the change', 'error');
+		throw new Error('apply not confirmed');
 	}
 
 	serviceReload(service) {

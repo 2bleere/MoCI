@@ -63,7 +63,7 @@
 				"/bin/rm -f /tmp/firmware.bin": ["exec"]
 			},
 			"ubus": {
-				"uci": ["set", "add", "delete", "commit"],
+				"uci": ["set", "add", "delete", "commit", "apply", "confirm", "rollback", "order"],
 				"file": ["write", "exec"],
 				"system": ["reboot"],
 				"network.interface": ["up", "down"],
