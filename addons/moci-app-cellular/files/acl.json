@@ -1,0 +1,16 @@
+{
+	"moci-app-cellular": {
+		"description": "MoCI add-on Cellular: read modem status and bands, read/send/delete SMS, send AT commands",
+		"read": {
+			"uci": ["3ginfo", "sms_tool_js"],
+			"file": {
+				"/usr/share/3ginfo-lite/3ginfo.sh": ["exec"],
+				"/usr/bin/modemband.sh json": ["exec"],
+				"/usr/bin/sms_tool *": ["exec"]
+			}
+		},
+		"write": {
+			"file": { "/usr/bin/modemband.sh setbands *": ["exec"] }
+		}
+	}
+}
